@@ -41,7 +41,14 @@ function env(side){
     if(!ys.length)ys=[outer[xs.indexOf(i?xmax:xmin)][1]];top.push(Math.max(...ys));bot.push(Math.min(...ys));}
   const yl=outer[xs.indexOf(xmin)][1],yr=outer[xs.indexOf(xmax)][1];
   const closed=X.map(x=>{const u=(x-xmin)/(xmax-xmin);return yl+(yr-yl)*u-38*Math.sin(Math.PI*u)});
-  return {X,top,bot,closed,xmin,xmax,N,outer};
+  // smooth displacement field for the lashes (no sudden jump at the outer corner)
+  const CR=side=='L'?[-1e9,451.88]:[548.15,1e9];
+  const G0=xmin-60,G1=xmax+60,GN=400,GS=[],sig=10;
+  const rawAt=x=>{x=Math.max(CR[0],Math.min(CR[1],x));if(x<xmin||x>xmax){const outerSide=side=='L'?x<xmin:x>xmax;if(outerSide)return 0;x=Math.max(xmin,Math.min(xmax,x));}
+    let u=(x-xmin)/(xmax-xmin),f=u*N,i=Math.floor(f),k=Math.min(i+1,N);const tp=top[i]+(top[k]-top[i])*(f-i),cl=closed[i]+(closed[k]-closed[i])*(f-i);return cl-tp;};
+  for(let i=0;i<=GN;i++){const x=G0+(G1-G0)*i/GN;let s=0,w=0;for(let j=-30;j<=30;j++){const dx=j*sig/10,ww=Math.exp(-(dx*dx)/(2*sig*sig));s+=rawAt(x+dx)*ww;w+=ww;}const o=side=='L'?x-xmin:xmax-x,tt=Math.max(0,Math.min(1,(o+12)/24)),tp=tt*tt*(3-2*tt);GS.push(s/w*tp);}
+  const lashD=x=>{let f=(x-G0)/(G1-G0)*GN;f=Math.max(0,Math.min(GN,f));const i=Math.floor(f),k=Math.min(i+1,GN);return GS[i]+(GS[k]-GS[i])*(f-i);};
+  return {X,top,bot,closed,xmin,xmax,N,outer,lashD};
 }
 const ENV={L:env('L'),R:env('R')};
 function sample(E,arr,x){let u=(x-E.xmin)/(E.xmax-E.xmin);u=Math.max(0,Math.min(1,u));const f=u*E.N,i=Math.floor(f),k=Math.min(i+1,E.N);return arr[i]+(arr[k]-arr[i])*(f-i)}
@@ -50,8 +57,8 @@ function low(E,x,e){const b=sample(E,E.bot,x),c=sample(E,E.closed,x);return b+(c
 const INK='rgb(4,0,0)';
 const rgb=c=>`rgb(${c.map(v=>Math.round(v*255)).join(',')})`;
 function pathOf(paths,map,closed=true){g.beginPath();for(const P of paths){P.forEach((p,i)=>{const q=tx(map?map(p):p);i?g.lineTo(q[0],q[1]):g.moveTo(q[0],q[1])});if(closed)g.closePath();}}
-function drawItem(it,map){if(it.kind=='fill'){pathOf(it.paths,map);g.fillStyle=rgb(it.color);g.fill('evenodd');}
-  else{pathOf(it.paths,map,it.closed);g.strokeStyle=rgb(it.color);g.lineWidth=it.width*SC;g.lineJoin='miter';g.miterLimit=10;g.lineCap='butt';g.stroke();}}
+function drawItem(it,map,round){if(it.kind=='fill'){pathOf(it.paths,map);g.fillStyle=rgb(it.color);g.fill('evenodd');}
+  else{pathOf(it.paths,map,it.closed);g.strokeStyle=rgb(it.color);g.lineWidth=it.width*SC;g.lineJoin=round?'round':'miter';g.miterLimit=10;g.lineCap=round?'round':'butt';g.stroke();}}
 function polyline(xs,fy){g.beginPath();xs.forEach((x,i)=>{const q=tx([x,fy(x)]);i?g.lineTo(q[0],q[1]):g.moveTo(q[0],q[1])});}
 function drawEye(side,P){
   const e=P.e,E=ENV[side];
@@ -80,9 +87,8 @@ function drawEye(side,P){
   }
   g.strokeStyle=INK;g.lineWidth=5*SC;g.lineCap='round';g.lineJoin='round';
   polyline(E.X,lidL);g.stroke();polyline(E.X,x=>low(E,x,e));g.stroke();
-  const CR={L:[-1e9,451.88],R:[548.15,1e9]}[side],cx=x=>Math.max(CR[0],Math.min(CR[1],x));
-  const lm=p=>e<=0?p:[p[0],p[1]+(lid(E,cx(p[0]),e)-sample(E,E.top,cx(p[0])))];
-  for(const i of LASH[side])drawItem(ITEMS[i],lm);
+  const lm=p=>e<=0?p:[p[0],p[1]+e*E.lashD(p[0])];
+  for(const i of LASH[side])drawItem(ITEMS[i],lm,e>0);
   if(P.lines>0){const L=side=='L',cx0=L?200:800,cy0=-372;g.lineWidth=6*SC;
     [-35,0,35].forEach(da=>{const a=((L?-125:-55)+da*(L?-1:1))*Math.PI/180,r0=6+14*P.lines,r1=r0+34*Math.min(1,P.lines*1.6);
       const p0=tx([cx0+Math.cos(a)*r0,cy0-Math.sin(a)*r0]),p1=tx([cx0+Math.cos(a)*r1,cy0-Math.sin(a)*r1]);
@@ -155,7 +161,8 @@ function frame(){
 }
 resize();window.addEventListener('resize',resize);
 if(reduce){scheduleBlink(start);}
-requestAnimationFrame(frame);
+const qs=new URLSearchParams(location.search);
+if(qs.has('e')){render(Object.assign({e:0,ix:0,iy:0,iscale:1,pop:1,spark:0,star:0,lines:0},{e:+qs.get('e')}));}else requestAnimationFrame(frame);
 })();
 </script>
 </body>
